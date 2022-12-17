@@ -1,0 +1,6 @@
+Qty,Designator,Footprint,Comment,LCSC Part # (optional),Description (optional)
+2,"C1, C2",C0402,100nF 16V,C1525,Samsung CL05B104KO5NNNC 100nF 16V 0402
+1,C3,C0805,10uF 25V,C15850,Samsung CL21A106KAYNNNE  10uF 25V 0805
+1,U$2,FXCARD-EDGE,Do not mount,Do not mount,Card edge
+1,IC2,SOIC-14_150mil,"74HC32D,653",C5632,74HC 2V~6V 2uA 2 4 ORGate SOIC-14_150mil Gates ROHS
+1,IC1,PDIP-32,Do not mount,Do not mount,"SST39SF040-70-4C-PHEl 4Mbit Flash Memory, 70ns; 5V, PDIP, 32-Pin"
