@@ -146,7 +146,9 @@ int banks_in_use;
 int bram_formatted;
 u8 flash_formatted[MAX_SLOTS];
 
-//u8 flash_free[MAX_SLOTS];
+int flash_free[MAX_SLOTS];
+char comment_slot[MAX_SLOTS][COMMENT_LENGTH+2];
+char date_slot[MAX_SLOTS][16];
 
 
 ///////////////////////////////// Joypad routines
@@ -1062,6 +1064,7 @@ static int pal;
 static char bottom_limit;
 static char refresh;
 int i;
+int j;
 int q;
 //u8 * comment_addr;
 //u8 * date_addr;
@@ -1104,6 +1107,36 @@ int q;
    }
    refresh = 1;
 
+   // Pre-fetch the key information about all the entries
+   //
+   for (i = 0; i < MAX_SLOTS; i++)
+   {
+      flash_free[i] = 0;
+      for (j = 0; j < 16; j++)
+      {
+         date_slot[i][j] = '\0';
+      }
+      for (j = 0; j < (COMMENT_LENGTH + 2); j++)
+      {
+         comment_slot[i][j] = '\0';
+      }
+
+      if (is_formatted(calc_bank_addr(i))) {
+
+         copy_to_buffer( calc_bank_addr(i) );
+         copy_annotate_to_buffer( calc_bank_annotate_addr(i) );
+
+         flash_free[i] = check_buffer_free();
+         for (j = 0; j < 11; j++)
+         {
+            date_slot[i][j] = date_buf[j];
+         }
+         for (j = 0; j < (COMMENT_LENGTH + 2); j++)
+         {
+            comment_slot[i][j] = comment_buf[j];
+         }
+      }
+   }
 
    while(1)
    {
@@ -1153,10 +1186,19 @@ int q;
 
             if (is_formatted(calc_bank_addr(i))) {
 
-               copy_to_buffer( calc_bank_addr(i) );
-               copy_annotate_to_buffer( calc_bank_annotate_addr(i) );
+//               copy_to_buffer( calc_bank_addr(i) );
+//               copy_annotate_to_buffer( calc_bank_annotate_addr(i) );
 
-               freespace = check_buffer_free();
+//               freespace = check_buffer_free();
+               freespace = flash_free[(page*page_size)+i];
+               for (j = 0; j < 11; j++)
+               {
+                  date_buf[j] = date_slot[(page*page_size)+i][j];
+               }
+               for (j = 0; j < (COMMENT_LENGTH + 2); j++)
+               {
+                  comment_buf[j] = comment_slot[(page*page_size)+i][j];
+               }
 
                print_at(2, HEX_LINE+1+i, pal, " ");
                putnumber_at(3, HEX_LINE+1+i, pal, 2, (page*page_size)+i+1);
@@ -1398,9 +1440,11 @@ char sector_num[8];
                   {
                      flash_erase_sector( (u8 *) ( calc_bank_addr(menu_B -1) + ((j<<1) * 4096)) );
                   }
+                  clear_panel();
 	          print_at(7, INSTRUCT_LINE+2, 3, "Entry Erased       ");
 	       }
-               clear_panel();
+               else
+                  clear_panel();
             }
 	 }
 	 else if (menu_item == 3)
