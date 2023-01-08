@@ -1,0 +1,7 @@
+binary bank
+name Flash Bank
+maker dshadoff
+makerid n2c
+date 20221203
+country 1
+version 1
