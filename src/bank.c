@@ -42,15 +42,21 @@
 #define STAT_LINE        5
 #define HEX_LINE         9
 
-#define FX_BASE          0xE0000000
-#define FXBMP_BASE       0xE8000000
-#define FLASH_BANK_BASE  81920
-#define FLASH_BANK_SIZE  (36 * 1024)
-#define FLASH_BANK_CMNT  (32 * 1024)
-#define COMMENT_OFFSET   12
+#define FX_BASE          0xE0000000      // memory location of start of internal backup memory
+#define FXBMP_BASE       0xE8000000      // memory location of start of external backup memory
+#define FLASH_BANK_BASE  81920           // within FX-BMP cart, start of 'slot' storage
+#define FLASH_BANK_SIZE  (36 * 1024)     // size of 'slot' (32KB for data + 4KB for date/comment metadata)
+#define FLASH_BANK_CMNT  (32 * 1024)     // location of metadata within slot
+#define COMMENT_OFFSET   12              // Ddate is at the start of metadata; this is start of Comment location
 
-#define MAX_SLOTS        12
+#define COMMENT_LENGTH   18
 
+#define MAX_SLOTS        12              // 12 slots fit in a 512KB Flash chip
+
+// These FAT attributes are for the 32KB internal SRAM
+// on the PC-FX; different values would be used when
+// reporting on larger external memory carts
+//
 #define FAT_OFFSET           0x80
 #define FAT_RESERVED         3
 #define FAT_ENTRIES_32K      236
@@ -60,10 +66,9 @@
 #define FAT_DIR_ENTRY_SIZE   32
 
 
-//extern void flash_erase_sector( u32 sector);
-//extern void flash_write( u32 addr, u8 value);
 extern void flash_erase_sector( u8 * sector);
 extern void flash_write( u8 * addr, u8 value);
+extern void flash_id( u8 * addr );
 
 void printsjis(char *text, int x, int y);
 void print_narrow(u32 sjis, u32 kram);
@@ -87,12 +92,11 @@ volatile uint16_t * const MEM_6270A_SR = (uint16_t *) 0x80000400;
 
 
 char buffer[2048];
-char dir_entry[64][20]; // up to 64 entries of 19 characters (plus null terminator) each
+char dir_entry[64][20]; // up to 64 entries of 19 characters (plus null terminator) each (in FAT)
 u32  num_dir_entries;
 
 // Flash memory identifcation and usage:
-char id_a;             // byte 1 of flash identity
-char id_b;             // byte 2 of flash identity
+u8   chip_id[4];        // first two bytes are buffer for returning flash chip identity
 char page;
 u32  flashbank_addr;
 
@@ -109,12 +113,12 @@ const char letter_display[] =
 
 char name[12];
 char date[12];
-char today_comment[16];
-char comment_buf[32];
+char today_comment[COMMENT_LENGTH + 1];
+char comment_buf[128];
 char date_buf[16];
 
-char comment[66];      /* this is used as 15-byte 'Name', but could be longer */
-                       /* (user interface might become more difficult though) */
+char comment[128];     /* this is used as 'Name', but only part is currently used */
+                       /* (user interface might become more difficult if more is used) */
 
 int year;
 int month;
@@ -137,12 +141,13 @@ int stepval = 0;
 
 /* these are read/calculated from the card */
 /* at start and after each major operation */
-int bram_free __attribute__ ((aligned (4)));
+int bram_free;
 int banks_in_use;
 u8 bram_formatted;
-u8 flash_formatted[16];
+u8 flash_formatted[MAX_SLOTS];
 
-char tempbuf[16];
+//u8 flash_free[MAX_SLOTS];
+
 
 ///////////////////////////////// Joypad routines
 volatile u32 joypad;
@@ -195,6 +200,7 @@ __attribute__ ((noinline)) void step(void)
 {
    stepval++;;
 }
+//////////
 
 u8 * calc_bank_addr(int banknum)
 {
@@ -257,13 +263,13 @@ int i;
    flash_write( (target + (FLASH_BANK_CMNT * 2) + (11 * 2)), 0);
 
 
-   for (i = 0; i < 16; i++)
+   for (i = 0; i < COMMENT_LENGTH; i++)
    {
 //      *(target + ((FLASH_BANK_CMNT + COMMENT_OFFSET) * 2) + (i * 2)) = comment[i];
       flash_write( (target + ((FLASH_BANK_CMNT + COMMENT_OFFSET) * 2) + (i * 2)), comment[i]);
    }
 //   *(target + ((FLASH_BANK_CMNT + COMMENT_OFFSET) * 2) + (16 * 2)) = 0;
-   flash_write( (target + ((FLASH_BANK_CMNT + COMMENT_OFFSET) * 2) + (16 * 2)), 0);
+   flash_write( (target + ((FLASH_BANK_CMNT + COMMENT_OFFSET) * 2) + (COMMENT_LENGTH * 2)), 0);
 }
 
 void copy_to_buffer(u8 * source)
@@ -284,7 +290,7 @@ int i;
    {
       date_buf[i] = *(source + (i<<1));
    }
-   for (i = 0; i < 16; i++)
+   for (i = 0; i < COMMENT_LENGTH; i++)
    {
       comment_buf[i] = *(source + (COMMENT_OFFSET * 2) + (i<<1));
    }
@@ -363,8 +369,6 @@ int is_bram_formatted()
 {
 static int retval;
 
-   eris_bkupmem_set_access(1,1);
-
    if ((bram_mem[6] == 'P') && (bram_mem[8] == 'C') &&
        (bram_mem[10] == 'F') && (bram_mem[12] == 'X') &&
        (bram_mem[14] == 'S') && (bram_mem[16] == 'r') &&
@@ -380,8 +384,6 @@ static int retval;
 u8 is_formatted(u8 * buf)
 {
 static int retval;
-
-   eris_bkupmem_set_access(1,1);
 
    if ((buf[6] == 'P') && (buf[8] == 'C') &&
        (buf[10] == 'F') && (buf[12] == 'X') &&
@@ -401,7 +403,7 @@ void clear_panel(void)
 
    for (i = INSTRUCT_LINE; i < HEX_LINE + 17; i++)
    {
-      print_at(3, i, 0, "                                        ");
+      print_at(2, i, 0, "                                         ");
    }
 }
 
@@ -567,6 +569,7 @@ void clear_errors(void)
 void top_menu(void)
 {
 static int menu_selection;
+//char tempbuf[16];
 //int i;
 
    vsync(2);
@@ -578,8 +581,6 @@ static int menu_selection;
    print_at(7, HEX_LINE+10, 5, "PC-FX:");
 
 // Print "PCFXSram" (if reading properly)
-//
-//   eris_bkupmem_set_access(1,1);
 //
 //   for (i = 0; i < 8; i++) {
 //      tempbuf[i] = bram_mem[(i*2)+6];
@@ -901,11 +902,11 @@ int i, j;
    x_pos = 0;
    y_pos = 0;
 
-   strcpy(today_comment, "               ");
-   today_comment[15] = 0x00;
+   strcpy(today_comment, "                  ");
+   today_comment[COMMENT_LENGTH] = 0x00;
    comment_index = 0;
 
-   print_at(12, HEX_LINE, 0, ">> _______________ <<");
+   print_at(11, HEX_LINE, 0, ">> __________________ <<");
 
    refresh = 1;
 
@@ -913,9 +914,9 @@ int i, j;
    {
       if (refresh)
       {
-         print_at(15, HEX_LINE, 0, today_comment);
+         print_at(14, HEX_LINE, 0, today_comment);
 
-	 putch_at(comment_index+15, HEX_LINE, 1, today_comment[comment_index]);
+	 putch_at(comment_index+14, HEX_LINE, 1, today_comment[comment_index]);
 
          for (i = 0; i < 6; i++)
 	 {
@@ -1013,14 +1014,14 @@ int i, j;
 
       if (joytrg & JOY_II) {
          date_level = -1;
-         strncpy(comment, today_comment, 15);
+         strncpy(comment, today_comment, COMMENT_LENGTH);
 	 break;
       }
 
       if (joytrg & JOY_I) {
          if ((y_pos == 5) && (x_pos == 12))   /* END */
 	 {
-            strncpy(comment, today_comment, 15);
+            strncpy(comment, today_comment, COMMENT_LENGTH);
             break;
 	 }
 	 else if ((y_pos == 5) && (x_pos == 10))  /* Backspace */
@@ -1034,14 +1035,14 @@ int i, j;
 	 else if ((y_pos == 5) && (x_pos == 8))  /* Space */
 	 {
 	    today_comment[comment_index++] = ' ';
-	    if (comment_index == 15)
-               comment_index = 14;
+	    if (comment_index == COMMENT_LENGTH)
+               comment_index = COMMENT_LENGTH-1;
 	 }
 	 else  /* everything else */
 	 {
 	    today_comment[comment_index++] = letter_display[(y_pos*13)+x_pos];
-	    if (comment_index == 15)
-               comment_index = 14;
+	    if (comment_index == COMMENT_LENGTH)
+               comment_index = COMMENT_LENGTH-1;
 	 }
 
          refresh = 1;
@@ -1069,14 +1070,14 @@ int q;
 
    clear_panel();
 
-   print_at(4, HEX_LINE-2, 5, "Bank");
-   print_at(4, HEX_LINE-1, 5, "----");
-   print_at(9, HEX_LINE-2, 5, "Save Date");
-   print_at(9, HEX_LINE-1, 5, "----------");
-   print_at(21, HEX_LINE-2, 5, "Free");
-   print_at(21, HEX_LINE-1, 5, "----");
-   print_at(28, HEX_LINE-2, 5, "Name");
-   print_at(27, HEX_LINE-1, 5, "---------------");
+   print_at(2, HEX_LINE-2, 5, "Bank");
+   print_at(2, HEX_LINE-1, 5, "----");
+   print_at(7, HEX_LINE-2, 5, "Save Date");
+   print_at(7, HEX_LINE-1, 5, "----------");
+   print_at(19, HEX_LINE-2, 5, "Free");
+   print_at(19, HEX_LINE-1, 5, "----");
+   print_at(25, HEX_LINE-2, 5, "Name");
+   print_at(24, HEX_LINE-1, 5, "------------------");
 
    if (menu_A == 1)        /* view */
    {
@@ -1111,19 +1112,19 @@ int q;
             clear_errors();
 
          if (bram_formatted) {
-            print_at(4, HEX_LINE, ((menu_selection == 0) ? 1 : 0), "BRAM             ");
-            putnumber_at(20, HEX_LINE, ((menu_selection == 0) ? 1: 0), 5, bram_free);
-            print_at(25, HEX_LINE, ((menu_selection == 0) ? 1 : 0), "                 ");
+            print_at(2, HEX_LINE, ((menu_selection == 0) ? 1 : 0), "BRAM             ");
+            putnumber_at(18, HEX_LINE, ((menu_selection == 0) ? 1: 0), 5, bram_free);
+            print_at(23, HEX_LINE, ((menu_selection == 0) ? 1 : 0), "                   ");
          }
          else
          {
             if (menu_selection == 0) /* if unformatted and current selection, */
             {                        /* disallow moving to next screen */
                advance = 0;
-               print_at(8, INSTRUCT_LINE+1, 3, "No contents to view.");
+               print_at(6, INSTRUCT_LINE+1, 3, "No contents to view.");
 	    }
 
-            print_at(4, HEX_LINE, ((menu_selection == 0) ? 1 : 2), "BRAM Unused                           ");
+            print_at(2, HEX_LINE, ((menu_selection == 0) ? 1 : 2), "BRAM Unused                              ");
          }
 
 
@@ -1138,14 +1139,10 @@ int q;
             else
                pal = 0;
 
-            print_at(4, HEX_LINE+1+i, pal, " ");
-            putnumber_at(5, HEX_LINE+1+i, pal, 2, (page*page_size)+i+1);
-            print_at(7, HEX_LINE+1+i, pal, "  ");
-
 	    for (q = 0; q < 11; q++) {
                date_buf[q] = '\0';
 	    }
-	    for (q = 0; q < 17; q++) {
+	    for (q = 0; q < COMMENT_LENGTH + 1; q++) {
                comment_buf[q] = '\0';
 	    }
 
@@ -1156,36 +1153,53 @@ int q;
 
                freespace = check_buffer_free();
 
-               putnumber_at(20, HEX_LINE+1+i, pal, 5, freespace);
-               print_at(25, HEX_LINE+1+i, pal, "  ");
+               print_at(2, HEX_LINE+1+i, pal, " ");
+               putnumber_at(3, HEX_LINE+1+i, pal, 2, (page*page_size)+i+1);
+               print_at(5, HEX_LINE+1+i, pal, "  ");
+
+               putnumber_at(18, HEX_LINE+1+i, pal, 5, freespace);
+               print_at(23, HEX_LINE+1+i, pal, " ");
 
                date_buf[11] = '\0';
 
-               comment_buf[15] = '\0';
+	       // show full length even when comment is short
+               if (strlen(comment_buf) < COMMENT_LENGTH)
+               {
+                  for (q = strlen(comment_buf); q < COMMENT_LENGTH; q++)
+                  {
+                     comment_buf[q] = ' ';
+                  }
+               }
 
-               print_at(27, HEX_LINE+1+i, pal, comment_buf);
+               comment_buf[COMMENT_LENGTH] = '\0';
+
+               print_at(24, HEX_LINE+1+i, pal, comment_buf);
 
             }
             else
             {
 	       /* no contents */
+               print_at(2, HEX_LINE+1+i, pal, " ");
+               putnumber_at(3, HEX_LINE+1+i, pal, 2, (page*page_size)+i+1);
+               print_at(5, HEX_LINE+1+i, pal, "  ");
+
                if (menu_selection != ((page*page_size)+i+1))
                {
-                  print_at(20, HEX_LINE+1+i, 2, "       Not In Use     ");
+                  print_at(18, HEX_LINE+1+i, 2, "      Not In Use        ");
                }
 	       else
                {
-                  print_at(20, HEX_LINE+1+i, pal, "       Not In Use     ");
+                  print_at(18, HEX_LINE+1+i, pal, "      Not In Use        ");
 
 		  if (menu_A == 1)
                   {
                      advance = 0;
-                     print_at(8, INSTRUCT_LINE+1, 3, "No contents to view.");
+                     print_at(6, INSTRUCT_LINE+1, 3, "No contents to view.");
 		  }
 		  else if (menu_A == 3)
                   {
                      advance = 0;
-                     print_at(8, INSTRUCT_LINE+1, 3, "No contents to restore.");
+                     print_at(6, INSTRUCT_LINE+1, 3, "No contents to restore.");
 		  }
                }
             }
@@ -1194,14 +1208,14 @@ int q;
                /* no date set */
                if (menu_selection != ((page*page_size)+i+1))
                {
-                  print_at(9, HEX_LINE+1+i, 2, "Not Set     ");
+                  print_at(7, HEX_LINE+1+i, 2, "Not Set     ");
                }
 	       else
-                  print_at(9, HEX_LINE+1+i, pal, "Not Set     ");
+                  print_at(7, HEX_LINE+1+i, pal, "Not Set     ");
             }
             else {
-               print_at(9, HEX_LINE+1+i, pal, date_buf);
-               print_at(19, HEX_LINE+1+i, pal, " ");
+               print_at(7, HEX_LINE+1+i, pal, date_buf);
+               print_at(17, HEX_LINE+1+i, pal, " ");
             }
          }
 	 refresh = 0;
@@ -1504,34 +1518,43 @@ void init(void)
         irq_enable();
 
         eris_low_sup_setreg(0, 5, 0x88);  // Set Hu6270 BG to show, and VSYNC Interrupt
+
+        eris_bkupmem_set_access(1,1);  // allow read and write access to both internal and external backup memory
 }
 
 int main(int argc, char *argv[])
 {
+char hexdata[8];
+
    init();
 
    /* title of page */
    strcpy(today_date, "          ");
    strcpy(card_date, "          ");
-   strcpy(default_date, "2022-12-06");
+   strcpy(default_date, "2023-01-07");
    strcpy(comment, "               ");
    strcpy(today_comment, "               ");
 
    print_at(16, TITLE_LINE, 4, "FX Megavault");
-   print_at(34, TITLE_LINE, 4, "v0.2");
+   print_at(34, TITLE_LINE, 4, "v0.3");
 
    /* check whether flash identifies itself as a flash chip which */
    /* works with the programming sequences in use in this program */
 
-   //flash_getid();
-   //
-   //if ((id_a != 0xBF) || (id_b != 0xB7))
-   //{
-   //   print_at(12, INSTRUCT_LINE +  6, 0, "THIS IS NOT BEING RUN");
-   //   print_at(12, INSTRUCT_LINE +  8, 0, "ON ORIGINAL MEDIA !!!");
-   //   print_at(15, INSTRUCT_LINE + 12, 0, "*** ABORT *** ");
-   //   while(1);
-   //}
+   flash_id( &chip_id[0] );
+
+   sprintf(hexdata, "%2.2X %2.2X", chip_id[0], chip_id[1]);
+   
+   if ((chip_id[0] != 0xBF) || (chip_id[1] != 0xB7))
+   {
+      print_at( 8, INSTRUCT_LINE +  4, 0, "THIS IS NOT BEING RUN ON THE");
+      print_at( 8, INSTRUCT_LINE +  6, 0, "CORRECT TYPE OF FLASH CHIP.");
+      print_at( 8, INSTRUCT_LINE + 10, 0, "PLEASE USE ORIGINAL MEDIA !!!");
+      print_at( 8, INSTRUCT_LINE + 12, 0, "MEDIA = ");
+      print_at(16, INSTRUCT_LINE + 12, 0, hexdata);
+      print_at(15, INSTRUCT_LINE + 15, 0, "*** ABORT *** ");
+      while(1);
+   }
    
    menu_level = 1;
 
@@ -1621,13 +1644,9 @@ int main(int argc, char *argv[])
 	    else
 	    {
                strncpy(date, today_date, 11);
-               strncpy(comment, today_comment, 16);
+               strncpy(comment, today_comment, COMMENT_LENGTH + 1);
 
                copy_to_buffer( bram_mem);
-//	       flashbank = BASE_FLASH_BANK + menu_B - 1;
-//	       flash_erasesec();
-//	       flash_write();
-//	       move2buf();
                buffer_to_flash( calc_bank_addr(menu_B -1) );
 
 	       menu_level = 1;
@@ -1646,10 +1665,6 @@ int main(int argc, char *argv[])
 	    else
 	    {
                copy_to_buffer( calc_bank_addr(menu_B -1) );
-//	       flashbank = BASE_FLASH_BANK + menu_B - 1;
-//	       move2buf();
-//	       buf2bram();
-
 	       buffer_to_bram();
 
 	       menu_level = 1;

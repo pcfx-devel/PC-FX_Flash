@@ -16,6 +16,7 @@
 
      .global _flash_erase_sector
      .global _flash_write
+     .global _flash_id
 
 
 .equiv r_tmp,    r8
@@ -107,5 +108,54 @@ checkloop:
     mov  r18, lp
     jmp  [lp]
 
+
+#-----------------------------------
+#
+#  flash_id( u8 * ptr );
+#
+#    Reads Flash chip ID into 2 consecutive bytes
+#    'ptr' points to char array to copy the 2 bytes into
+#
+_flash_id:
+    #
+    # r6   will enter with the pointer address to the storage buffer for chip ID
+    #
+    mov lp, r18
+
+    movw 0xe800aaaa, r_base1     # base external + 0x5555 offset (times 2, as A0 is missing)
+    movw 0xe8005554, r_base2     # base external + 0x2AAA offset (times 2, as A0 is missing)
+
+    movw 0xAA, r_cmd             # command byte 1
+    st.b r_cmd, 0[r_base1]
+    movw 0x55, r_cmd             # command byte 2
+    st.b r_cmd, 0[r_base2]
+    movw 0x90, r_cmd             # enter identification mode command byte
+    st.b r_cmd, 0[r_base1]
+
+#    movw 0x100, r_tmp            # need to delay at least 150ns
+#decloop:
+#    add -1, r_tmp
+#    bne  decloop
+
+    nop
+    nop
+    nop
+    nop
+
+    movw 0xe8000000, r_tmp
+    ld.b 0[r_tmp], r_cmd
+    st.b r_cmd, 0[r6]
+    ld.b 2[r_tmp], r_cmd         # 2 offset because FX-BMP memory is every second byte
+    st.b r_cmd, 1[r6]
+
+    movw 0xAA, r_cmd             # command byte 1
+    st.b r_cmd, 0[r_base1]
+    movw 0x55, r_cmd             # command byte 2
+    st.b r_cmd, 0[r_base2]
+    movw 0xF0, r_cmd             # exit identification mode command byte
+    st.b r_cmd, 0[r_base1]
+
+    mov  r18, lp
+    jmp  [lp]
 
 #-----------------------------------
