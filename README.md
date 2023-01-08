@@ -70,7 +70,7 @@ is either programmed or planned.
 This was written using a version of gcc for V810 processor, with 'pcfxtools' which assist in
 building executables for PC-FX, and 'liberis' which is a library of functions targetting the PC-FX.
 
-These can be found here:
+These can be found here:\
 ![https://github.com/jbrandwood/v810-gcc](https://github.com/jbrandwood/v810-gcc)\
 ![https://github.com/jbrandwood/pcfxtools](https://github.com/jbrandwood/pcfxtools)\
 ![https://github.com/jbrandwood/liberis](https://github.com/jbrandwood/liberis)
