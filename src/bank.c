@@ -97,8 +97,8 @@ u32  num_dir_entries;
 
 // Flash memory identifcation and usage:
 u8   chip_id[4];        // first two bytes are buffer for returning flash chip identity
-char page;
-u32  flashbank_addr;
+int  page;
+//u32  flashbank_addr;
 
 // Used for entry of date and name
 //
@@ -113,7 +113,7 @@ const char letter_display[] =
 
 char name[12];
 char date[12];
-char today_comment[COMMENT_LENGTH + 1];
+char today_comment[COMMENT_LENGTH + 2];
 char comment_buf[128];
 char date_buf[16];
 
@@ -129,8 +129,8 @@ int next_free;
 int offset_ptr;
 int save_size;
 
-char countdown;
-char advance;
+//char countdown;
+int advance;
 int menu_A;
 int menu_B;
 int confirm;
@@ -143,7 +143,7 @@ int stepval = 0;
 /* at start and after each major operation */
 int bram_free;
 int banks_in_use;
-u8 bram_formatted;
+int bram_formatted;
 u8 flash_formatted[MAX_SLOTS];
 
 //u8 flash_free[MAX_SLOTS];
@@ -422,7 +422,7 @@ void buff_listing(void)
 {
 // int i, j;
  int i;
- int page;
+// int page;
  int page_entries;
  int breakout;
  char num_buff[7];
@@ -1097,6 +1097,11 @@ int q;
       menu_selection = 1;  /* BRAM is not eligible for selection */
       bottom_limit = 1;
    }
+   else if (menu_A == 4)   /* erase */
+   {
+      menu_selection = 1;  /* BRAM is not eligible for selection */
+      bottom_limit = 1;
+   }
    refresh = 1;
 
 
@@ -1201,6 +1206,11 @@ int q;
                      advance = 0;
                      print_at(6, INSTRUCT_LINE+1, 3, "No contents to restore.");
 		  }
+		  else if (menu_A == 4)
+                  {
+                     advance = 0;
+                     print_at(6, INSTRUCT_LINE+1, 3, "No contents to erase. ");
+		  }
                }
             }
 
@@ -1297,6 +1307,14 @@ static int confirm_value;
       putnumber_at(26, HEX_LINE+3, 4, 2, menu_B);
       print_at(13, HEX_LINE+5, 4, "to Backup Memory ?");
    }
+   else if (menu_A == 4)
+   {
+      print_at(14, HEX_LINE+1, 4, "Confirm ");
+      print_at(22, HEX_LINE+1, 3, "ERASE");
+      print_at(15, HEX_LINE+3, 4, "of BANK #");
+      putnumber_at(24, HEX_LINE+3, 4, 2, menu_B);
+      print_at(13, HEX_LINE+5, 4, "from Backup Memory ?");
+   }
 
    while (1)
    {
@@ -1331,6 +1349,83 @@ static int confirm_value;
    }
 }
 
+void erase_menu(void)
+{
+int menu_item = 1;
+int i;
+int j;
+char sector_num[8];
+
+   clear_panel();
+   while (1)
+   {
+      print_at(12, STAT_LINE + 4, ((menu_item == 1) ? 1 : 0), " ERASE BOOT SECTOR  ");
+      print_at(12, STAT_LINE + 6, ((menu_item == 2) ? 1 : 0), " ERASE SINGLE ENTRY ");
+      print_at(12, STAT_LINE + 8, ((menu_item == 3) ? 1 : 0), " ERASE ENTIRE CART  ");
+
+      if (joytrg & JOY_UP) {
+         menu_item--;
+	 if (menu_item == 0)
+            menu_item = 3;
+      }
+
+      if (joytrg & JOY_DOWN) {
+         menu_item++;
+	 if (menu_item == 4)
+            menu_item = 1;
+      }
+
+      if ((joytrg & JOY_RUN) || (joytrg & JOY_I))
+      {
+         if (menu_item == 1)
+	 {
+	    flash_erase_sector( (u8 *) FXBMP_BASE);
+	    print_at(7, INSTRUCT_LINE+2, 3, "Sector Erased      ");
+	 }
+	 else if (menu_item == 2)
+	 {
+            menu_A = 4;
+            select_bank_menu();
+
+            if (menu_B == -1)
+               continue;
+            else
+            {
+               confirm_menu();
+               if (confirm == 1)
+	       {
+                  for (j = 0; j < 9; j++)
+                  {
+                     flash_erase_sector( (u8 *) ( calc_bank_addr(menu_B -1) + ((j<<1) * 4096)) );
+                  }
+	          print_at(7, INSTRUCT_LINE+2, 3, "Entry Erased       ");
+	       }
+               clear_panel();
+            }
+	 }
+	 else if (menu_item == 3)
+	 {
+            for (i = 0; i < 128; i++)
+            {
+               sprintf(sector_num, "%3d", i);
+	       print_at(7, INSTRUCT_LINE+2, 3, "Erasing Sector ");
+	       print_at(22, INSTRUCT_LINE+2, 3, sector_num);
+               flash_erase_sector(  (u8 *) (FXBMP_BASE + ((i<<1) * 4096)) );
+	       vsync(0);
+            }
+	    print_at(7, INSTRUCT_LINE+2, 3, "Cartridge Erased   ");
+	 }
+      }
+
+      if ((joytrg & JOY_II))
+      {
+         break;
+      }
+
+      vsync(0);
+   }
+}
+
 void credits(void)
 {
 //int i;
@@ -1352,6 +1447,12 @@ void credits(void)
 
    while (1)
    {
+      if ((joypad & 4095) == (JOY_III | JOY_IV | JOY_V | JOY_UP | JOY_SELECT) )
+      {
+         erase_menu();
+         break;
+      }
+
       if ((joytrg & JOY_RUN) || (joytrg & JOY_I))
 	 break;
 
@@ -1545,6 +1646,7 @@ char hexdata[8];
 
    sprintf(hexdata, "%2.2X %2.2X", chip_id[0], chip_id[1]);
    
+#ifndef NO_ENFORCE_FLASH
    if ((chip_id[0] != 0xBF) || (chip_id[1] != 0xB7))
    {
       print_at( 8, INSTRUCT_LINE +  4, 0, "THIS IS NOT BEING RUN ON THE");
@@ -1555,6 +1657,7 @@ char hexdata[8];
       print_at(15, INSTRUCT_LINE + 15, 0, "*** ABORT *** ");
       while(1);
    }
+#endif
    
    menu_level = 1;
 
