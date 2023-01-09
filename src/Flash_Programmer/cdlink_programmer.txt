@@ -1,0 +1,7 @@
+binary programmer
+name Flash Programmer
+maker dshadoff
+makerid n2c
+date 20230108
+country 1
+version 1
