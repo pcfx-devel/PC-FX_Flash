@@ -132,11 +132,7 @@ _flash_id:
     movw 0x90, r_cmd             # enter identification mode command byte
     st.b r_cmd, 0[r_base1]
 
-#    movw 0x100, r_tmp            # need to delay at least 150ns
-#decloop:
-#    add -1, r_tmp
-#    bne  decloop
-
+    nop                          # need to delay at least 150ns
     nop
     nop
     nop
