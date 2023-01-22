@@ -13,8 +13,11 @@ LIBS           = -leris -lc -lsim -lgcc
 bank.cue: cdlink_bank.txt bank
 	pcfx-cdlink cdlink_bank.txt bank
 
+bank.flashboot: bank
+	python3 mkflashboot.py bank
+
 bank: bank.o font.o backup.o flashfuncs.o
-	v810-ld $(LDFLAGS) bank.o backup.o flashfuncs.o font.o $(LIBS) -o bank.linked -Map bank.map
+	v810-ld $(LDFLAGS) bank.o backup.o flashfuncs.o font.o $(LIBS) --sort-common=descending -o bank.linked -Map bank.map
 	v810-objcopy -O binary bank.linked bank
 
 backup.o: backup.s
