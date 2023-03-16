@@ -1,7 +1,28 @@
 #(c) 2023 David Shadoff
 import sys
 
-program = open(sys.argv[1],'rb').read()
+trailflash = False
+
+if (len(sys.argv) == 3):
+    if (sys.argv[1] == '-mednafen'):
+        trailflash = True
+        filename = sys.argv[2]
+    elif (sys.argv[2] == '-mednafen'):
+        trailflash = True
+        filename = sys.argv[1]
+    else:
+        print("Usage:")
+        print("   mkflashboot.py [-medanfen] <filename>")
+        print(" OR ")
+        print("   mkflashboot.py <filename> [-medanfen]")
+        exit
+else:
+    filename = sys.argv[1]
+
+
+program = open(filename,'rb').read()
+
+program = open(filename,'rb').read()
 length = len(program)
 
 rest1 = 4096 - 64
@@ -11,7 +32,7 @@ rest2 = (128 * 1024) - 4096 - length
 #print("rest1 = ", length)
 #print("rest2 = ", length)
 
-outfile = sys.argv[1] + '.bootflash'
+outfile = filename + '.bootflash'
 f = open(outfile, 'wb')
 
 # Original boot information - identifying it as a FX-BMP type card:
@@ -57,10 +78,12 @@ for fill in range(rest1):
 f.write(program)
 
 # Now fill out the remainder of the FXBMP file size to satisfy Mednafen
+# (if required)
 #
-for fill in range(rest2):
-    databytes=bytearray(filler)
-    f.write(databytes)     # fill the boot sector of the flash (4096 bytes)
+if (trailflash == True):
+    for fill in range(rest2):
+        databytes=bytearray(filler)
+        f.write(databytes)     # fill the boot sector of the flash (4096 bytes)
 
 f.close()
 
