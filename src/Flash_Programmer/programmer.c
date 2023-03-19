@@ -2,7 +2,7 @@
  *   FlashBank - Program for the PC-FX to manage backup memory snapshots
  *               onto Flash memory for later retrieval
  *
- *   Copyright (C) 2022 David Shadoff
+ *   Copyright (C) 2022, 2023 David Shadoff
  */
 
 #include <stdarg.h>
@@ -53,9 +53,19 @@ void print_at(int x, int y, int pal, char* str);
 void putch_at(int x, int y, int pal, char c);
 void putnumber_at(int x, int y, int pal, int digits, int value);
 
+
+
 extern u8 font[];
 extern u8 fxbmp_mem[];
-extern u8 program_buffer[];
+
+// These are exported from the "objectization" step of the raw binary file "payload"
+extern u8 binary_payload_start[];
+extern u8 binary_payload_end[];
+
+// These are exported from the "objectization" step of the text file "payload_name"
+extern u8 binary_payload_name_start[];
+extern u8 binary_payload_name_end[];
+
 
 // interrupt-handling variables
 volatile int sda_frame_count = 0;
@@ -65,16 +75,27 @@ volatile int last_sda_frame_count = 0;
 volatile uint16_t * const MEM_6270A_SR = (uint16_t *) 0x80000400;
 
 
+
+u8   boot_block[4096];  // Initial Flash sector needed for boot
+u8   boot_sequence[] = {
+	0x24, 0x8A, 0xDF,  'P',  'C',  'F',  'X',  'C',  'a',  'r',  'd', 0x80, 0x00, 0x01, 0x01, 0x00,
+	0x01, 0x40, 0x00, 0x00, 0x01, 0xf9, 0x03, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  'P',  'C',  'F',  'X',  'B',  'o',  'o',  't'
+	// next 16 bytes are 4-byte words of:
+	//    source offset    (0x1000),
+	//    RAM Destination  (0x8000), 
+	//    Transfer Size    (see write_len below), 
+	//    Transfer Address (0x8000)
+};
+
+char name_to_flash[32];  // construct a string out of payload_name
+
 // Flash memory identifcation and usage:
 u8   chip_id[4];        // first two bytes are buffer for returning flash chip identity
 
-const char letter_display[] =
-   {"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890.,-[_]'!#%      "};
-                              /* "<BCK> <SP> <END>" */
-
-int target_addr = 0xe8000000;   // fxbmp_mem[]
-int source_addr = 0x00100000;   // program_buffer[]
-int write_len   = 0x00080000;   // 512KB
+int target_addr = (int) &fxbmp_mem[0];              // 0xe8000000
+int source_addr = (int) &binary_payload_start[0];   // binary_payload_start[]
+int write_len;                                      // size of payload, up to 512KB
 
 //char countdown;
 int advance;
@@ -190,17 +211,21 @@ char tempbuf[16];
 
    menu_selection = 4;
 
-   sprintf(tempbuf, "%8.8X", target_addr);
-   print_at( 8, STAT_LINE + 4, ((menu_selection == 1) ? 1 : 0), " Target Addr   0x");
-   print_at(25, STAT_LINE + 4, ((menu_selection == 1) ? 1 : 0), tempbuf);
+   print_at( 3, STAT_LINE,     0, "File to Flash:");
+   print_at( 3, STAT_LINE + 2, 4, name_to_flash);
 
-   sprintf(tempbuf, "%8.8X", source_addr);
-   print_at( 8, STAT_LINE + 6, ((menu_selection == 2) ? 1 : 0), " Source Addr   0x");
-   print_at(25, STAT_LINE + 6, ((menu_selection == 2) ? 1 : 0), tempbuf);
+   sprintf(tempbuf, "%8.8X", target_addr);
+   print_at( 8, STAT_LINE + 6, ((menu_selection == 1) ? 1 : 0), " Target Addr   0x");
+   print_at(25, STAT_LINE + 6, ((menu_selection == 1) ? 1 : 0), tempbuf);
+
+//   sprintf(tempbuf, "%8.8X", source_addr);
+   sprintf(tempbuf, "%8.8X", (int) &binary_payload_start[0]);
+   print_at( 8, STAT_LINE + 8, ((menu_selection == 2) ? 1 : 0), " Source Addr   0x");
+   print_at(25, STAT_LINE + 8, ((menu_selection == 2) ? 1 : 0), tempbuf);
 
    sprintf(tempbuf, "%8.8X", write_len);
-   print_at( 8, STAT_LINE + 8, ((menu_selection == 3) ? 1 : 0), " Write Length  0x");
-   print_at(25, STAT_LINE + 8, ((menu_selection == 3) ? 1 : 0), tempbuf);
+   print_at( 8, STAT_LINE + 10, ((menu_selection == 3) ? 1 : 0), " Write Length  0x");
+   print_at(25, STAT_LINE + 10, ((menu_selection == 3) ? 1 : 0), tempbuf);
 
    while(1)
    {
@@ -475,16 +500,6 @@ void init(void)
 
 	eris_pad_init(0); // initialize joypad
 
-//	chartou32("7up BG example", str);
-//	printstr(str, 9, 0x10, 1);
-
-//	print_at(6,  6, 0, "7up BG example");
-//	print_at(6,  7, 1, "Testing Color 1");
-//	print_at(6,  8, 2, "Testing Color 2");
-//	print_at(6,  9, 3, "Testing Color 3");
-//	print_at(6, 10, 4, "Testing Color 4");
-//	print_at(6, 11, 5, "Testing Color 5");
-
         // Disable all interrupts before changing handlers.
         irq_set_mask(0x7F);
 
@@ -526,12 +541,22 @@ char hexdata[8];
 int lower_limit;
 int num_sectors;
 int i;
+int name_size;
 
    init();
 
+   name_size   = (int) (binary_payload_name_end - binary_payload_name_start);
+   if (name_size > 31) name_size = 31;
+   for (i = 0; i < name_size; i++) {
+      name_to_flash[i] = binary_payload_name_start[i];
+   }
+   name_to_flash[name_size] = '\0';
+
+   write_len   = (int) (binary_payload_end - binary_payload_start);   // size of payload file
+
    /* title of page */
    print_at(15, TITLE_LINE, 4, "FX Programmer");
-   print_at(34, TITLE_LINE, 4, "v0.1");
+   print_at(34, TITLE_LINE, 4, "v0.2");
 
    /* check whether flash identifies itself as a flash chip which */
    /* works with the programming sequences in use in this program */
@@ -541,6 +566,12 @@ int i;
    sprintf(hexdata, "%2.2X %2.2X", chip_id[0], chip_id[1]);
    
 #ifndef NO_ENFORCE_FLASH
+// SST39SF series identification codes:
+// chip_id[0] = 0xBF (SST)
+// chip_id[1] = 0xB5 (39SF010 = 1Mb = 128KB)
+//              0xB6 (39SF020 = 2Mb = 256KB)
+//              0xB7 (39SF040 = 4Mb = 512KB)
+//
 //   if ((chip_id[0] != 0xBF) || (chip_id[1] != 0xB7))
 //   {
 //      print_at( 8, INSTRUCT_LINE +  4, 0, "THIS IS NOT BEING RUN ON THE");
@@ -581,6 +612,9 @@ int i;
 
 	 if (menu_A == 4)         // Erase Range
          {
+
+            print_at(2, INSTRUCT_LINE+2, 0, "                                         ");
+
             /* Erase range */
             for (i = lower_limit; i < (lower_limit + num_sectors); i++)
             {
@@ -602,6 +636,9 @@ int i;
 //
 //               flash_erase_sector(  (u8 *) (FXBMP_BASE + ((i<<1) * 4096)) );
 //            }
+
+            print_at(2, INSTRUCT_LINE+2, 0, "                                         ");
+
             /* Program Data */
             for (i = 0; i < write_len; i++)
             {
@@ -613,7 +650,7 @@ int i;
                }
 
 //               flash_write( (u8 *)(target_addr + (i<<1)), *((u8 *)(source_addr + i)) );
-               flash_write( (u8 *)(target_addr + (i<<1)), program_buffer[i] );
+               flash_write( (u8 *)(target_addr + (i<<1)), binary_payload_start[i] );
             }
          }
       }

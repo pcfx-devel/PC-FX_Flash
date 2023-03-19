@@ -13,9 +13,15 @@ LIBS           = -leris -lc -lsim -lgcc
 programmer.cue: cdlink_programmer.txt programmer
 	pcfx-cdlink cdlink_programmer.txt programmer
 
-programmer: programmer.o font.o backup.o flashfuncs.o
-	v810-ld $(LDFLAGS) programmer.o backup.o flashfuncs.o font.o $(LIBS) -o programmer.linked -Map programmer.map
+programmer: programmer.o font.o backup.o flashfuncs.o payload.o payload_name.o
+	v810-ld $(LDFLAGS) programmer.o backup.o flashfuncs.o font.o payload.o payload_name.o $(LIBS) -o programmer.linked -Map programmer.map
 	v810-objcopy -O binary programmer.linked programmer
+
+payload.o: payload
+	v810-objcopy -I binary -O elf32-v810 -B v810 payload payload.o
+
+payload_name.o: payload_name
+	v810-objcopy -I binary -O elf32-v810 -B v810 payload_name payload_name.o
 
 backup.o: backup.s
 	v810-as $(ASFLAGS) backup.s -o backup.o
