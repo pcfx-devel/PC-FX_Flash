@@ -1,7 +1,7 @@
 {
     "author": {
-        "email": "david.shadoff@gmail.com",
-        "name": "David Shadoff"
+        "email": "support.eagle@autodesk.com",
+        "name": "Autodesk EAGLE"
     },
     "description": {
         "EN": "EAGLE default 2 layer CAM job."
@@ -277,7 +277,7 @@
             ]
         }
     ],
-    "timestamp": "2022-11-18T20:03:26",
+    "timestamp": "2019-07-17T17:48:33",
     "type": "EAGLE CAM job",
     "units": "metric",
     "version": "9.2.0"
